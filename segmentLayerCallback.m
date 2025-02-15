@@ -11,22 +11,23 @@ function segmentLayerCallback(fileList, sliceField, maskList)
         selectedStr = selectedItems;
     end
     
-    % Ожидаемый формат: "имя_файла [x, y, z]"
-    % Извлекаем имя файла (до первого пробела) и получаем имя переменной без расширения
+    % Ожидается формат: "имя_файла [x, y, z]"
     tokens = strsplit(selectedStr, ' ');
     fileNameWithExt = tokens{1};
     [varName, ~, ~] = fileparts(fileNameWithExt);
     varName = fileNameWithExt;
-    
-    % Получаем 3D-массив из базового рабочего пространства
+
+    % Получаем 3D-массив из рабочего пространства
     try
         array3D = evalin('base', varName);
     catch
-        uialert(fileList.Parent, ['Переменная "', varName, '" не найдена в базовом рабочем пространстве.'], 'Ошибка');
+        uialert(fileList.Parent, ...
+            ['Переменная "', varName, '" не найдена в базовом рабочем пространстве.'], ...
+            'Ошибка');
         return;
     end
     
-    % Получаем номер слоя из текстового поля
+    % Проверяем корректность номера слоя
     sliceNumber = round(sliceField.Value);
     [~, ~, zDim] = size(array3D);
     if sliceNumber < 1 || sliceNumber > zDim
@@ -34,45 +35,39 @@ function segmentLayerCallback(fileList, sliceField, maskList)
         return;
     end
     
-    % Извлекаем изображение выбранного слоя
+    % Извлекаем указанный слой (2D-срез)
     sliceImage = array3D(:,:,sliceNumber);
     
     % Запускаем Image Segmenter с выбранным срезом
-    segApp = imageSegmenter(sliceImage);
+    imageSegmenter(sliceImage);
     
-    % Блокируем выполнение до закрытия окна Image Segmenter.
-    % (Предполагается, что приложение возвращает handle с полем UIFigure)
-    uiwait(segApp.UIFigure);
-    
-    % После закрытия Image Segmenter пытаемся получить экспортированную маску.
-    % Пользователь должен экспортировать маску с именем "exportedMask".
-    try
-        mask = evalin('base', 'exportedMask');
-    catch
-        uialert(fileList.Parent, 'Маска не найдена в рабочем пространстве. Убедитесь, что вы экспортировали маску с именем "exportedMask".', 'Ошибка');
-        return;
+    % Если таймер для обновления масок ещё не запущен, создаём и запускаем его
+    existingTimers = timerfind('Tag', 'MaskTimer');
+    if isempty(existingTimers)
+        t = timer('ExecutionMode', 'fixedRate', ...
+                  'Period', 1, ...           % обновление каждую секунду
+                  'TimerFcn', @updateMaskList, ...
+                  'Tag', 'MaskTimer');
+        start(t);
+        disp('Запущен таймер для постоянного обновления списка масок.');
     end
-    
-    % Добавляем описание маски в список масок.
-    newMaskItem = sprintf('%s (слой %d)', varName, sliceNumber);
-    currentItems = maskList.Items;
-    if isempty(currentItems)
-        currentItems = {newMaskItem};
-    else
-        currentItems{end+1} = newMaskItem;
+
+    % Вложенная функция для обновления списка масок
+    function updateMaskList(~,~)
+        % Получаем все 2D-логические переменные из рабочего пространства
+        newMasks = get2DLogicalVarNames();
+        % Обновляем список масок в главном окне
+        maskList.Items = newMasks;
     end
-    maskList.Items = currentItems;
-    
-    % Можно сохранить маску в структуре maskData в базовом рабочем пространстве для дальнейшего использования
-    try
-        maskData = evalin('base', 'maskData');
-    catch
-        maskData = struct();
+
+    % Вспомогательная функция для получения имен всех 2D-логических переменных
+    function varNames = get2DLogicalVarNames()
+        info = evalin('base', 'whos');
+        varNames = {};
+        for i = 1:numel(info)
+            if strcmp(info(i).class, 'logical') && numel(info(i).size) == 2
+                varNames{end+1} = info(i).name; %#ok<AGROW>
+            end
+        end
     end
-    fieldName = matlab.lang.makeValidName(newMaskItem);
-    maskData.(fieldName) = mask;
-    assignin('base', 'maskData', maskData);
-    
-    % Вывод сообщения в командное окно
-    disp(['Маска для ', newMaskItem, ' добавлена в список.']);
 end
