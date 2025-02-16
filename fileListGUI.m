@@ -1,7 +1,5 @@
-
 function fileListGUI
-    clear all
-    % Создаем главное окно GUI с увеличенными размерами для нового функционала
+    % Создаем главное окно GUI с заданной позицией и размерами
     fig = uifigure('Name', 'GUI: Список файлов и масок', 'Position', [100, 100, 750, 500]);
     movegui(fig, 'center');
     
@@ -42,21 +40,59 @@ function fileListGUI
         'Value', 1, ...
         'Limits', [1 Inf], 'RoundFractionalValues', true);
     
+    % Кнопка для передачи выбранного слоя в Image Segmenter
+    btnSegment = uibutton(fig, 'push', ...
+        'Text', 'Segment Layer', ...
+        'Position', [610, 355, 120, 30], ...
+        'ButtonPushedFcn', @(src, event) segmentLayerCallback(fileList, sliceField));
     
     % Список для масок
     maskList = uilistbox(fig, ...
         'Position', [470, 50, 250, 280], ...
         'MultiSelect', 'on', ...
         'Items', {});  % Изначально пустой
-
-     % Кнопка для передачи выбранного слоя в Image Segmenter
-    btnSegment = uibutton(fig, 'push', ...
-        'Text', 'Segment Layer', ...
-        'Position', [610, 355, 120, 30], ...
-        'ButtonPushedFcn', @(src, event) segmentLayerCallback(fileList, sliceField, maskList));
     
+    % Сохраняем handle maskList в данных окна для доступа из таймера
+    setappdata(fig, 'MaskList', maskList);
+    
+    % Создаем и запускаем глобальный таймер для обновления списка масок
+    t = timer('ExecutionMode', 'fixedRate', 'Period', 1, ...
+        'TimerFcn', @(src,event) updateMaskList(fig));
+    setappdata(fig, 'MaskTimer', t);
+    start(t);
+    
+    % Добавляем кнопку "Расчет SNR" для вызова окна snrCalculator
     btnSNR = uibutton(fig, 'push', ...
-    'Text', 'Расчет SNR', ...
-    'Position', [470, 400, 120, 30], ...
-    'ButtonPushedFcn', @(src,event) snrCalculator());
+        'Text', 'Расчет SNR', ...
+        'Position', [470, 400, 120, 30], ...
+        'ButtonPushedFcn', @(src,event) snrCalculator());
+    
+    % Функция обновления списка масок
+    function updateMaskList(figHandle)
+        % Если главное окно закрыто, останавливаем таймер
+        if ~isvalid(figHandle)
+            stop(t);
+            delete(t);
+            return;
+        end
+        % Получаем текущий список масок
+        maskList = getappdata(figHandle, 'MaskList');
+        newMasks = get2DLogicalVarNames();
+        try
+            maskList.Items = newMasks;
+        catch ME
+            disp(['Ошибка обновления списка масок: ' ME.message]);
+        end
+    end
+
+    % Вспомогательная функция для получения имен 2D-логических переменных из base
+    function varNames = get2DLogicalVarNames()
+        info = evalin('base', 'whos');
+        varNames = {};
+        for i = 1:numel(info)
+            if strcmp(info(i).class, 'logical') && numel(info(i).size) == 2
+                varNames{end+1} = info(i).name; %#ok<AGROW>
+            end
+        end
+    end
 end
